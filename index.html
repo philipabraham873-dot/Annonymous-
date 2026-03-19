@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>AnonBox</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <style>
+    body { margin:0; font-family:Arial; background:#0f172a; color:white;}
+    .container { max-width:400px; margin:auto; padding:15px; padding-bottom:90px;}
+    .card { background:#1e293b; padding:18px; border-radius:16px; margin-top:15px;}
+    input, textarea { width:100%; padding:12px; margin-top:10px; border-radius:10px; border:none; background:#334155; color:white;}
+    button { width:100%; padding:12px; margin-top:10px; border-radius:10px; border:none; background:#6366f1; color:white; font-weight:bold;}
+    .secondary { background:#22c55e;}
+    ul { padding:0;}
+    li { list-style:none; background:#334155; padding:12px; margin-top:10px; border-radius:12px;}
+    .reply { font-size:13px; color:#94a3b8; margin-top:6px;}
+    .actions { display:flex; gap:5px; margin-top:8px;}
+    .small-btn { flex:1; font-size:12px; padding:6px;}
+    .hidden { display:none;}
+
+    .nav {
+      position:fixed; bottom:0; width:100%; max-width:400px;
+      left:50%; transform:translateX(-50%);
+      display:flex; background:#1e293b; border-top:1px solid #334155;
+    }
+    .nav-item { flex:1; text-align:center; padding:10px; cursor:pointer;}
+    .active { color:#6366f1;}
+    .badge { background:red; border-radius:50%; font-size:10px; padding:3px 6px; margin-left:5px;}
+  </style>
+</head>
+
+<body>
+
+<div class="container">
+
+  <div id="home" class="card">
+    <h2>Send me anonymous messages 👇</h2>
+
+    <div id="createProfile">
+      <input id="username" placeholder="Create username">
+      <button onclick="createProfile()">Create Link</button>
+    </div>
+
+    <div id="profileSection" class="hidden">
+      <p id="userLink"></p>
+      <button class="secondary" onclick="copyLink()">Copy Link</button>
+      <button onclick="shareLink()">Share</button>
+    </div>
+  </div>
+
+  <div id="send" class="card hidden">
+    <h3 id="sendTitle">Send anonymous message</h3>
+    <textarea id="message" placeholder="Type something..."></textarea>
+    <button onclick="sendMessage()">Send</button>
+  </div>
+
+  <div id="inbox" class="card hidden">
+    <h3>Inbox <span id="badge" class="badge hidden">0</span></h3>
+    <ul id="messages"></ul>
+  </div>
+
+  <div id="settings" class="card hidden">
+    <h3>⚙️ Settings</h3>
+    <button onclick="copyLink()">Copy My Link</button>
+    <button onclick="clearProfile()">Clear Profile</button>
+  </div>
+
+</div>
+
+<div class="nav">
+  <div class="nav-item active" onclick="switchTab('inbox')">📩</div>
+  <div class="nav-item" onclick="switchTab('home')">🏠</div>
+  <div class="nav-item" onclick="switchTab('settings')">⚙️</div>
+</div>
+
+<script type="module">
+
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+import {
+  getFirestore,
+  collection,
+  addDoc,
+  getDocs,
+  deleteDoc,
+  doc,
+  updateDoc,
+  query,
+  where,
+  onSnapshot,
+  orderBy,
+  serverTimestamp
+} from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+
+// 🔥 CONFIG
+const firebaseConfig = {
+  apiKey: "YOUR_KEY",
+  authDomain: "annonymous-ba576.firebaseapp.com",
+  projectId: "annonymous-ba576",
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+
+const params = new URLSearchParams(window.location.search);
+const user = params.get("user");
+
+let count = 0;
+let isListening = false;
+
+// VISITOR MODE
+if (user && user.trim() !== "") {
+  switchTab("send");
+  document.getElementById("sendTitle").innerText =
+    `Send anonymous message to ${user}`;
+}
+
+// TAB SWITCH
+window.switchTab = function(tab) {
+  ["home","inbox","settings","send"].forEach(id =>
+    document.getElementById(id).classList.add("hidden")
+  );
+
+  document.querySelectorAll(".nav-item").forEach(el =>
+    el.classList.remove("active")
+  );
+
+  document.getElementById(tab).classList.remove("hidden");
+
+  if (tab === "inbox") listenMessages();
+};
+
+// CREATE PROFILE
+window.createProfile = async function () {
+  let username = document.getElementById("username").value.trim();
+
+  if (!username) return alert("Enter valid username");
+
+  if (!/^[a-zA-Z0-9_]+$/.test(username)) {
+    return alert("Only letters, numbers, underscore allowed");
+  }
+
+  const q = query(collection(db,"users"), where("username","==",username));
+  const snap = await getDocs(q);
+
+  if (!snap.empty) return alert("Username already taken ❌");
+
+  await addDoc(collection(db,"users"), { username });
+
+  localStorage.setItem("username", username);
+
+  const link = location.origin + "?user=" + username;
+
+  document.getElementById("createProfile").style.display = "none";
+  document.getElementById("profileSection").classList.remove("hidden");
+  document.getElementById("userLink").innerText = link;
+
+  switchTab("inbox");
+};
+
+// COPY
+window.copyLink = function () {
+  const link = document.getElementById("userLink").innerText;
+  if (!link) return alert("No link yet!");
+  navigator.clipboard.writeText(link);
+  alert("Copied!");
+};
+
+// SHARE
+window.shareLink = function () {
+  const link = document.getElementById("userLink").innerText;
+  if (!link) return;
+
+  if (navigator.share) {
+    navigator.share({
+      title: "Send me anonymous messages",
+      url: link
+    });
+  } else {
+    alert("Sharing not supported");
+  }
+};
+
+// CLEAR
+window.clearProfile = function () {
+  localStorage.removeItem("username");
+  location.reload();
+};
+
+// SEND MESSAGE
+window.sendMessage = async function () {
+  const msg = document.getElementById("message").value;
+
+  if (!msg.trim()) return alert("Message cannot be empty");
+
+  await addDoc(collection(db, "messages"), {
+    user,
+    text: msg,
+    reply: "",
+    timestamp: serverTimestamp()
+  });
+
+  document.getElementById("message").value = "";
+  alert("Sent!");
+};
+
+// LISTEN (REALTIME)
+function listenMessages() {
+  if (isListening) return;
+  isListening = true;
+
+  const username = localStorage.getItem("username");
+  if (!username) return;
+
+  const q = query(
+    collection(db,"messages"),
+    where("user","==",username),
+    orderBy("timestamp","desc")
+  );
+
+  onSnapshot(q, (snapshot) => {
+    const list = document.getElementById("messages");
+    list.innerHTML = "";
+
+    let newCount = 0;
+
+    snapshot.forEach(docSnap => {
+      const data = docSnap.data();
+      newCount++;
+
+      const li = document.createElement("li");
+
+      li.innerHTML = `
+        <strong>${data.text}</strong>
+        ${data.reply ? `<div class="reply">Reply: ${data.reply}</div>` : ""}
+        <div class="actions">
+          <button class="small-btn" onclick="replyMsg('${docSnap.id}')">Reply</button>
+          <button class="small-btn" onclick="deleteMsg('${docSnap.id}')">Delete</button>
+        </div>
+      `;
+
+      list.appendChild(li);
+    });
+
+    updateBadge(newCount);
+  });
+}
+
+// BADGE
+function updateBadge(newCount) {
+  const badge = document.getElementById("badge");
+  const lastSeen = localStorage.getItem("lastSeen") || 0;
+
+  if (newCount > lastSeen) {
+    badge.classList.remove("hidden");
+    badge.innerText = newCount - lastSeen;
+  }
+
+  localStorage.setItem("lastSeen", newCount);
+  count = newCount;
+}
+
+// DELETE
+window.deleteMsg = async function (id) {
+  await deleteDoc(doc(db,"messages",id));
+};
+
+// REPLY
+window.replyMsg = async function (id) {
+  const reply = prompt("Reply:");
+  if (!reply) return;
+
+  await updateDoc(doc(db,"messages",id), { reply });
+};
+
+// RESTORE SESSION
+if (localStorage.getItem("username")) {
+  const username = localStorage.getItem("username");
+
+  document.getElementById("createProfile").style.display = "none";
+  document.getElementById("profileSection").classList.remove("hidden");
+  document.getElementById("userLink").innerText =
+    location.origin + "?user=" + username;
+}
+
+</script>
+
+</body>
+</html>
